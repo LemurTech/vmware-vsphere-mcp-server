@@ -1,7 +1,7 @@
 # Dockerfile
 
 # Use a lightweight and stable Python base
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # Set default environment variables
 ENV PYTHONUNBUFFERED=1
