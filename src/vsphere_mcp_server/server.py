@@ -7,6 +7,8 @@ from typing import Dict, List
 from mcp.server.fastmcp import FastMCP
 
 from .vsphere_client import VSphereClient
+from .pyvmomi_client import PyVmomiClient
+from pyVmomi import vim, vmodl
 
 # Initialize MCP server
 mcp = FastMCP("vSphere MCP Server")
@@ -209,13 +211,17 @@ def list_hosts(hostname: str = None) -> str:
 
 
 @mcp.tool()
-def get_host_details(hostname: str, host_id: str) -> str:
+def get_host_details(hostname: str = None, host_id: str = None) -> str:
     """Get detailed information about an ESXi host.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         host_id: ESXi host ID
     """
+    if hostname is None:
+        hostname = os.environ.get('VCENTER_HOST')
+        if not hostname:
+            return 'Error: No hostname provided and VCENTER_HOST not set in environment'
     client = VSphereClient(hostname)
     try:
         response = client.get(f"vcenter/host/{host_id}")
@@ -238,12 +244,16 @@ def get_host_details(hostname: str, host_id: str) -> str:
 
 
 @mcp.tool()
-def list_datacenters(hostname: str) -> str:
+def list_datacenters(hostname: str = None) -> str:
     """List all datacenters.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get("vcenter/datacenter")
@@ -265,13 +275,17 @@ def list_datacenters(hostname: str) -> str:
 
 
 @mcp.tool()
-def get_datacenter_details(hostname: str, datacenter_id: str) -> str:
+def get_datacenter_details(hostname: str = None, datacenter_id: str = None) -> str:
     """Get detailed information about a datacenter.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         datacenter_id: Datacenter ID
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get(f"vcenter/datacenter/{datacenter_id}")
@@ -332,13 +346,17 @@ def list_datastores(hostname: str = None) -> str:
 
 
 @mcp.tool()
-def get_datastore_details(hostname: str, datastore_id: str) -> str:
+def get_datastore_details(hostname: str = None, datastore_id: str = None) -> str:
     """Get detailed information about a datastore.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         datastore_id: Datastore ID
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get(f"vcenter/datastore/{datastore_id}")
@@ -378,13 +396,17 @@ def get_datastore_details(hostname: str, datastore_id: str) -> str:
 
 # Organization Tools
 @mcp.tool()
-def list_folders(hostname: str, folder_type: str = "VIRTUAL_MACHINE") -> str:
+def list_folders(hostname: str = None, folder_type: str = "VIRTUAL_MACHINE") -> str:
     """List folders by type.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         folder_type: Folder type (VIRTUAL_MACHINE, HOST, DATACENTER, DATASTORE, NETWORK)
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get(f"vcenter/folder?filter.type={folder_type}")
@@ -408,13 +430,17 @@ def list_folders(hostname: str, folder_type: str = "VIRTUAL_MACHINE") -> str:
 
 
 @mcp.tool()
-def get_folder_details(hostname: str, folder_id: str) -> str:
+def get_folder_details(hostname: str = None, folder_id: str = None) -> str:
     """Get detailed information about a folder.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         folder_id: Folder ID
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get(f"vcenter/folder/{folder_id}")
@@ -481,13 +507,17 @@ def list_networks(hostname: str = None) -> str:
 
 
 @mcp.tool()
-def get_network_details(hostname: str, network_id: str) -> str:
+def get_network_details(hostname: str = None, network_id: str = None) -> str:
     """Get detailed information about a network.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         network_id: Network ID
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get(f"vcenter/network/{network_id}")
@@ -522,13 +552,17 @@ def get_network_details(hostname: str, network_id: str) -> str:
 
 
 @mcp.tool()
-def get_vlan_info(hostname: str, vlan_query: str) -> str:
+def get_vlan_info(hostname: str = None, vlan_query: str = "") -> str:
     """Get information about a VLAN by name or VLAN ID.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
         vlan_query: VLAN name (e.g., v1306-MEL03-Secure-Management) or VLAN ID (e.g., 1306)
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get("vcenter/network")
@@ -585,12 +619,16 @@ def get_vlan_info(hostname: str, vlan_query: str) -> str:
 
 
 @mcp.tool()
-def list_vlans(hostname: str) -> str:
+def list_vlans(hostname: str = None) -> str:
     """Extract and list VLAN information from network names.
 
     Args:
-        hostname: vSphere hostname (e.g., vcenter.domain.local)
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment if not provided)
     """
+    if hostname is None:
+        hostname = os.environ.get("VCENTER_HOST")
+        if not hostname:
+            return "Error: No hostname provided and VCENTER_HOST not set in environment"
     client = VSphereClient(hostname)
     try:
         response = client.get("vcenter/network")
@@ -1853,6 +1891,352 @@ def force_power_off_vm(vm_id: str, confirm: bool = False, hostname: str = None) 
         client.close()
 
 
+# ── pyVmomi-based Advanced Tools ──────────────────────────────────
+
+
+@mcp.tool()
+def list_datacenters_pyvmomi(hostname: str = None) -> str:
+    """List all datacenters using pyVmomi (direct SOAP connection).
+
+    Args:
+        hostname: vSphere hostname (optional, uses VCENTER_HOST from environment)
+    """
+    client = PyVmomiClient(host=hostname)
+    try:
+        dcs = client.content.rootFolder.childEntity
+        dc_list = [dc for dc in dcs if hasattr(dc, "hostFolder")]
+        if not dc_list:
+            return "No datacenters found."
+        result = f"Found {len(dc_list)} datacenter(s):\n\n"
+        for dc in dc_list:
+            result += f"  • {dc.name}\n"
+        return result.strip()
+    except Exception as e:
+        return f"Error listing datacenters via pyVmomi: {e}"
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def list_clusters_pyvmomi(datacenter: str = None, hostname: str = None) -> str:
+    """List all clusters in a datacenter using pyVmomi.
+
+    Args:
+        datacenter: Datacenter name (required). Use list_datacenters_pyvmomi first.
+        hostname: vSphere hostname (optional)
+    """
+    if not datacenter:
+        return "Error: datacenter name is required."
+
+    client = PyVmomiClient(host=hostname)
+    try:
+        dc = client.find_datacenter(datacenter)
+        if dc is None:
+            return f"Datacenter '{datacenter}' not found."
+
+        view = client.get_container_view(vim.ClusterComputeResource, container=dc.hostFolder)
+        try:
+            clusters = list(view.view)
+        finally:
+            view.Destroy()
+
+        if not clusters:
+            return f"No clusters found in datacenter '{datacenter}'."
+
+        result = f"Clusters in '{datacenter}' ({len(clusters)}):\n\n"
+        for cluster in clusters:
+            result += f"  • {cluster.name}\n"
+        return result.strip()
+    except Exception as e:
+        return f"Error listing clusters via pyVmomi: {e}"
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def find_template_pyvmomi(name: str, datacenter: str = None, hostname: str = None) -> str:
+    """Find a VM template by name using pyVmomi PropertyCollector.
+
+    Args:
+        name: Template name (full or partial, case-insensitive)
+        datacenter: Datacenter name to scope search (optional)
+        hostname: vSphere hostname (optional)
+    """
+    client = PyVmomiClient(host=hostname)
+    try:
+        dc = client.find_datacenter(datacenter) if datacenter else None
+        root = dc.hostFolder if dc else client.content.rootFolder
+
+        view = client.get_container_view(vim.VirtualMachine, container=root)
+        try:
+            collector = client.content.propertyCollector
+            traversal_spec = vmodl.query.PropertyCollector.TraversalSpec(
+                name="traverse", type=vim.view.ContainerView, path="view", skip=False
+            )
+            obj_spec = vmodl.query.PropertyCollector.ObjectSpec(
+                obj=view, skip=True, selectSet=[traversal_spec]
+            )
+            prop_spec = vmodl.query.PropertyCollector.PropertySpec(
+                type=vim.VirtualMachine,
+                pathSet=["name", "config.template", "runtime.powerState"],
+                all=False,
+            )
+            filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+                objectSet=[obj_spec], propSet=[prop_spec]
+            )
+            results = collector.RetrieveProperties([filter_spec])
+
+            matches = []
+            for obj_content in results:
+                props = {p.name: p.val for p in obj_content.propSet}
+                vm_name = props.get("name", "")
+                is_template = props.get("config.template")
+                if is_template and name.lower() in vm_name.lower():
+                    matches.append((vm_name, is_template))
+
+            if not matches:
+                return f"No template matching '{name}' found."
+
+            result = f"Templates matching '{name}':\n\n"
+            for vm_name, is_tpl in matches:
+                result += f"  • {vm_name}"
+                if datacenter:
+                    result += f" (DC: {datacenter})"
+                result += "\n"
+            return result.strip()
+        finally:
+            view.Destroy()
+    except Exception as e:
+        return f"Error finding template: {e}"
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def clone_vm(
+    template_name: str,
+    vm_name: str,
+    cluster_name: str,
+    datastore_name: str = "",
+    cpu_count: int = 0,
+    memory_gb: int = 0,
+    target_datacenter: str = "",
+    network_name: str = "",
+    confirm: bool = False,
+    hostname: str = None,
+) -> str:
+    """Clone a VM from a template using pyVmomi.
+
+    Supports cross-datacenter cloning with proper network binding.
+    Relies on the latest pyVmomi (9.x) for full API support.
+
+    Args:
+        template_name: Source template VM name
+        vm_name: Name for the new cloned VM
+        cluster_name: Target cluster name
+        datastore_name: Target datastore name (optional; if omitted, uses template's datastore)
+        cpu_count: CPU count for new VM (0 = use template default)
+        memory_gb: Memory in GB for new VM (0 = use template default)
+        target_datacenter: Datacenter name containing target cluster
+                           (required for cross-DC cloning)
+        network_name: Network/portgroup name to attach (optional)
+        confirm: Must be True to proceed
+        hostname: vSphere hostname (optional)
+    """
+    if not confirm:
+        return (
+            f"⚠️  CLONE OPERATION: Clone VM from template\n\n"
+            f"  Template: {template_name}\n"
+            f"  New VM: {vm_name}\n"
+            f"  Target Cluster: {cluster_name}\n"
+            f"  Target Datacenter: {target_datacenter or '(auto-detect)'}\n"
+            f"  Datastore: {datastore_name or '(template default)'}\n"
+            f"  CPU: {cpu_count or '(template default)'}\n"
+            f"  Memory: {f'{memory_gb} GB' if memory_gb else '(template default)'}\n"
+            f"  Network: {network_name or '(template default)'}\n\n"
+            f"To proceed, call again with confirm=True."
+        )
+
+    client = PyVmomiClient(host=hostname)
+    try:
+        si = client.si
+        content = client.content
+
+        # ── Step 1: Locate template ──
+        template_vm = client.find_vm(template_name)
+        if template_vm is None:
+            return f"Template '{template_name}' not found."
+
+        # Verify it is a template
+        if not template_vm.config.template:
+            return f"Error: '{template_name}' is a VM, not a template."
+
+        # Remember which DC the template is in
+        source_dc = None
+        obj = template_vm.parent
+        while obj:
+            if hasattr(obj, "hostFolder"):
+                source_dc = obj
+                break
+            obj = obj.parent
+
+        # ── Step 2: Locate target datacenter & cluster ──
+        if target_datacenter:
+            tg_dc = client.find_datacenter(target_datacenter)
+            if tg_dc is None:
+                return f"Target datacenter '{target_datacenter}' not found."
+        else:
+            tg_dc = source_dc
+
+        tg_cluster = client.find_cluster(cluster_name, tg_dc)
+        if tg_cluster is None:
+            return f"Cluster '{cluster_name}' not found in datacenter '{tg_dc.name}'."
+
+        # ── Step 3: Datastore ──
+        if datastore_name:
+            tg_datastore = client.find_datastore(datastore_name, tg_dc)
+            if tg_datastore is None:
+                return f"Datastore '{datastore_name}' not found in datacenter '{tg_dc.name}'."
+        else:
+            # Use the first datastore of the template (or cluster default)
+            if template_vm.datastore:
+                tg_datastore = template_vm.datastore[0]
+            else:
+                return "No datastore found on template and none specified."
+
+        # ── Step 4: Resource pool ──
+        resource_pool = tg_cluster.resourcePool
+
+        # ── Step 5: Target folder ──
+        # Strategy: find any existing VM in the target DC and use its parent folder
+        target_folder = client.get_any_vm_folder(tg_dc)
+
+        # ── Step 6: Build RelocateSpec ──
+        relocate_spec = vim.vm.RelocateSpec()
+        relocate_spec.pool = resource_pool
+        relocate_spec.datastore = tg_datastore
+
+        # Network binding
+        if network_name:
+            tg_network = client.find_network(network_name, tg_dc)
+            if tg_network is None:
+                return f"Network '{network_name}' not found in datacenter '{tg_dc.name}'."
+            # Map all template NICs to the target network
+            device_changes = []
+            for device in template_vm.config.hardware.device:
+                if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                    backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo()
+                    backing.deviceName = network_name
+                    backing.network = tg_network
+                    nic_spec = vim.vm.device.VirtualDeviceSpec()
+                    nic_spec.operation = vim.vm.device.VirtualDeviceSpec.Operation.edit
+                    nic_spec.device = device
+                    nic_spec.device.backing = backing
+                    device_changes.append(nic_spec)
+            relocate_spec.deviceChange = device_changes if device_changes else None
+
+        # ── Step 7: Build CloneSpec ──
+        clone_spec = vim.vm.CloneSpec()
+        clone_spec.location = relocate_spec
+        clone_spec.powerOn = False
+        clone_spec.template = False
+
+        # Customization (CPU/Memory)
+        if cpu_count or memory_gb:
+            config_spec = vim.vm.ConfigSpec()
+            if cpu_count:
+                config_spec.numCPUs = cpu_count
+            if memory_gb:
+                config_spec.memoryMB = memory_gb * 1024
+            clone_spec.config = config_spec
+
+        # ── Step 8: Execute clone ──
+        task = template_vm.CloneVM_Task(
+            folder=target_folder,
+            name=vm_name,
+            spec=clone_spec,
+        )
+
+        import time
+        from pyVmomi import vim as vim_mod
+
+        # Wait for task (poll with timeout)
+        timeout = 600
+        interval = 3
+        elapsed = 0
+        task_info = task.info
+        while task_info.state in (vim.TaskInfo.State.queued, vim.TaskInfo.State.running):
+            if elapsed >= timeout:
+                return f"Clone task timed out after {timeout}s. Task: {task_info.name} (state={task_info.state})"
+            time.sleep(interval)
+            elapsed += interval
+            task_info = task.info
+
+        if task_info.state == vim.TaskInfo.State.success:
+            return (
+                f"✅ VM clone completed successfully!\n\n"
+                f"  Template: {template_name}\n"
+                f"  New VM: {vm_name}\n"
+                f"  Cluster: {cluster_name}\n"
+                f"  Datacenter: {tg_dc.name}\n"
+                f"  Datastore: {tg_datastore.name}\n"
+                f"  CPU: {cpu_count or '(template default)'}\n"
+                f"  Memory: {f'{memory_gb} GB' if memory_gb else '(template default)'}\n"
+                f"  Network: {network_name or '(template default)'}\n"
+            )
+        else:
+            error = task_info.error
+            return (
+                f"❌ Clone task failed: state={task_info.state}\n"
+                f"  Error: {error.msg if error else 'Unknown error'}\n"
+                f"  Task: {task_info.name}"
+            )
+
+    except Exception as e:
+        return f"Error during clone: {e}"
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def get_vm_networks_pyvmomi(vm_name: str, hostname: str = None) -> str:
+    """Get network adapter details of a VM using pyVmomi.
+
+    Args:
+        vm_name: VM name
+        hostname: vSphere hostname (optional)
+    """
+    client = PyVmomiClient(host=hostname)
+    try:
+        vm = client.find_vm(vm_name)
+        if vm is None:
+            return f"VM '{vm_name}' not found."
+
+        result = f"Network adapters for '{vm_name}':\n\n"
+        nics_found = False
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                nics_found = True
+                backing = device.backing
+                network_name = "Unknown"
+                if hasattr(backing, "deviceName"):
+                    network_name = backing.deviceName
+                elif hasattr(backing, "network") and backing.network:
+                    network_name = backing.network.name
+                result += f"  • {device.deviceInfo.label}\n"
+                result += f"    MAC: {device.macAddress}\n"
+                result += f"    Network: {network_name}\n"
+                result += f"    Connected: {device.connectable.connected}\n\n"
+
+        if not nics_found:
+            result += "  No network adapters found."
+        return result.strip()
+    except Exception as e:
+        return f"Error getting network info: {e}"
+    finally:
+        client.close()
+
+
 def main() -> None:
     """Main entry point for the MCP server."""
     import os
@@ -1864,7 +2248,8 @@ def main() -> None:
     # Configure FastMCP settings for streamable HTTP transport
     mcp.settings.host = os.getenv("SERVER_HOST", "0.0.0.0")
     mcp.settings.port = int(os.getenv("SERVER_PORT", "8000"))
-    mcp.settings.stateless_http = True  # Enable stateless mode
+    mcp.settings.stateless_http = False
+    mcp.settings.json_response = True  # Return JSON instead of SSE for simpler parsing
     
     # Run with streamable HTTP transport
     mcp.run(transport="streamable-http")
