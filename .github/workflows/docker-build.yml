@@ -1,0 +1,19 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t vsphere-mcp-server:ci .
+
+      - name: Verify server module imports correctly
+        run: docker run --rm vsphere-mcp-server:ci python -c "from vsphere_mcp_server import server"
