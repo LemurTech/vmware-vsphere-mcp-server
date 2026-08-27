@@ -115,6 +115,54 @@ class PyVmomiClient:
             view_ref.Destroy()
         return None
 
+    def find_vm_by_id(self, vm_id: str) -> Optional[vim.VirtualMachine]:
+        """Find a VM by managed object ID ('vm-...') or by display name."""
+        if isinstance(vm_id, str) and vm_id.startswith("vm-"):
+            try:
+                return vim.VirtualMachine(vm_id, self.si._stub)
+            except Exception:
+                pass
+        return self.find_vm(vm_id)
+
+    def find_host_by_id(self, host_id: str) -> Optional[vim.HostSystem]:
+        """Find an ESXi host by managed object ID ('host-...') or by name."""
+        if isinstance(host_id, str) and host_id.startswith("host-"):
+            try:
+                return vim.HostSystem(host_id, self.si._stub)
+            except Exception:
+                pass
+        view_ref = self.get_container_view(vim.HostSystem)
+        try:
+            collector = self.content.propertyCollector
+            traversal_spec = vmodl.query.PropertyCollector.TraversalSpec(
+                name="traverse",
+                type=vim.view.ContainerView,
+                path="view",
+                skip=False,
+            )
+            obj_spec = vmodl.query.PropertyCollector.ObjectSpec(
+                obj=view_ref,
+                skip=True,
+                selectSet=[traversal_spec],
+            )
+            prop_spec = vmodl.query.PropertyCollector.PropertySpec(
+                type=vim.HostSystem,
+                pathSet=["name"],
+                all=False,
+            )
+            filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+                objectSet=[obj_spec],
+                propSet=[prop_spec],
+            )
+            result = collector.RetrieveProperties([filter_spec])
+            for obj_content in result:
+                props = {p.name: p.val for p in obj_content.propSet}
+                if props.get("name") == host_id:
+                    return obj_content.obj
+        finally:
+            view_ref.Destroy()
+        return None
+
     def find_cluster(self, name: str, datacenter: vim.Datacenter = None) -> Optional[vim.ClusterComputeResource]:
         """Find a cluster by name."""
         root = datacenter.hostFolder if datacenter else self.content.rootFolder

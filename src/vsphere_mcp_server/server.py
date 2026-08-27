@@ -28,6 +28,245 @@ def _handle_error(e: Exception, operation: str) -> str:
     return f"Error in {operation}: {error_msg}"
 
 
+def _is_404(e: Exception) -> bool:
+    """Detect a vCenter REST 404 (endpoint not published by this vCenter version)."""
+    return isinstance(e, ConnectionError) and "404" in str(e)
+
+
+def _wait_for_pyvmomi_task(service_instance, task, timeout: int = 300, operation: str = "task") -> str:
+    """Poll a pyVmomi task to completion and return a status string."""
+    import time
+    interval = 3
+    elapsed = 0
+    task_info = task.info
+    while task_info.state in (vim.TaskInfo.State.queued, vim.TaskInfo.State.running):
+        if elapsed >= timeout:
+            return (
+                f"⏱ {operation} timed out after {timeout}s. "
+                f"Task: {task_info.name} (state={task_info.state})"
+            )
+        time.sleep(interval)
+        elapsed += interval
+        task_info = task.info
+    if task_info.state == vim.TaskInfo.State.success:
+        return f"✅ {operation} completed successfully."
+    error = task_info.error
+    return (
+        f"❌ {operation} failed: state={task_info.state}\n"
+        f"  Error: {error.msg if error else 'Unknown error'}\n"
+        f"  Task: {task_info.name}"
+    )
+
+
+# On vCenter 7.0 the REST routes for snapshots/events/host-detail/alarms return
+# 404 (they are part of the vSphere 8.0 Automation API surface). These helpers
+# provide the same operations via the SOAP/vim API, which every vCenter version
+# supports. Tools call them only when the REST route 404s.
+def _pyvmomi_list_snapshots(vm_id: str, hostname: str) -> str:
+    client = PyVmomiClient(host=hostname)
+    try:
+        vm = client.find_vm_by_id(vm_id)
+        if vm is None:
+            return f"Virtual machine '{vm_id}' not found by name"
+        nodes: List = []
+
+        def walk(snapshot_list):
+            for node in snapshot_list:
+                nodes.append(node)
+                if node.childSnapshotList:
+                    walk(node.childSnapshotList)
+
+        if vm.snapshot:
+            walk(vm.snapshot.rootSnapshotList)
+        if not nodes:
+            return f"No snapshots found for VM {vm_id}"
+        result = f"Snapshots for VM {vm_id}:\n\n"
+        for s in nodes:
+            created = s.createTime.strftime('%Y-%m-%d %H:%M:%S') if s.createTime else 'Unknown'
+            sid = s.snapshot._moId if getattr(s, 'snapshot', None) is not None else 'Unknown'
+            desc = (s.description or '').strip()
+            result += f"• {s.name} (ID: {sid})\n"
+            result += f"  Created: {created}\n"
+            if desc:
+                result += f"  Description: {desc}\n"
+            result += f"  State: {getattr(s.state, 'name', s.state)}\n\n"
+        return result.strip()
+    except Exception as e:
+        return f"Error listing snapshots via pyVmomi for VM {vm_id}: {e}"
+    finally:
+        client.close()
+
+
+def _pyvmomi_create_snapshot(vm_id: str, name: str, description: str, hostname: str) -> str:
+    client = PyVmomiClient(host=hostname)
+    try:
+        vm = client.find_vm_by_id(vm_id)
+        if vm is None:
+            return f"Virtual machine '{vm_id}' not found by name"
+        task = vm.CreateSnapshot(name=name, description=description, memory=True, quiesce=True)
+        return _wait_for_pyvmomi_task(client.si, task, operation=f"CreateSnapshot '{name}'")
+    except Exception as e:
+        return f"Error creating snapshot via pyVmomi for VM {vm_id}: {e}"
+    finally:
+        client.close()
+
+
+def _pyvmomi_delete_snapshot(vm_id: str, snapshot_id: str, hostname: str) -> str:
+    client = PyVmomiClient(host=hostname)
+    try:
+        vm = client.find_vm_by_id(vm_id)
+        if vm is None:
+            return f"Virtual machine '{vm_id}' not found by name"
+        target = None
+
+        def find(snapshot_list):
+            nonlocal target
+            for node in snapshot_list:
+                if node.snapshot._moId == snapshot_id:
+                    target = node
+                    return True
+                if find(node.childSnapshotList):
+                    return True
+            return False
+
+        if vm.snapshot and find(vm.snapshot.rootSnapshotList) and target is not None:
+            task = target.snapshot.RemoveSnapshot_Task(removeChildren=False)
+            return _wait_for_pyvmomi_task(client.si, task, operation=f"Remove snapshot {snapshot_id}")
+        return f"Snapshot {snapshot_id} not found for VM {vm_id}"
+    except Exception as e:
+        return f"Error deleting snapshot via pyVmomi for VM {vm_id}: {e}"
+    finally:
+        client.close()
+
+
+def _pyvmomi_get_vm_events(vm_id: str, hostname: str) -> str:
+    client = PyVmomiClient(host=hostname)
+    try:
+        import datetime
+        vm = client.find_vm_by_id(vm_id)
+        if vm is None:
+            return f"Virtual machine '{vm_id}' not found by name"
+        now = datetime.datetime.now(datetime.timezone.utc)
+        spec = vim.event.EventFilterSpec()
+        spec.entity = vim.event.EventFilterSpec.ByEntity(
+            entity=vm, recursion=vim.event.EventFilterSpec.RecursionOption.self)
+        spec.maxCount = 500
+        # A time window is required: QueryEvents returns nothing without ByTime.
+        spec.time = vim.event.EventFilterSpec.ByTime(
+            beginTime=now - datetime.timedelta(days=30), endTime=now)
+        events = client.content.eventManager.QueryEvents(spec)
+        recent = events[-10:] if len(events) > 10 else events
+        if not recent:
+            return f"No events for VM {vm_id} in the last 30 days"
+        result = f"Recent Events for VM {vm_id}:\n\n"
+        for ev in recent:
+            t = ev.createdTime.strftime('%Y-%m-%d %H:%M:%S') if ev.createdTime else 'Unknown'
+            msg = getattr(ev, 'fullFormattedMessage', '') or ev.__class__.__name__
+            etype = getattr(ev, 'eventTypeId', ev.__class__.__name__)
+            result += f"• {etype}\n  Time: {t}\n  Description: {msg}\n\n"
+        return result.strip()
+    except Exception as e:
+        return f"Error getting events via pyVmomi for VM {vm_id}: {e}"
+    finally:
+        client.close()
+
+
+def _pyvmomi_get_alarms(hostname: str) -> str:
+    client = PyVmomiClient(host=hostname)
+    try:
+        am = client.content.alarmManager
+        types = [vim.Folder, vim.Datacenter, vim.ComputeResource,
+                 vim.ClusterComputeResource, vim.HostSystem, vim.Datastore,
+                 vim.Network, vim.VirtualMachine]
+        found = []
+        seen = set()
+        for t in types:
+            view = client.get_container_view(t)
+            try:
+                for entity in view.view:
+                    for alm in (am.GetAlarm(entity) or []):
+                        key = (alm._moId, getattr(entity, 'name', str(entity)))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        found.append((alm, entity))
+            finally:
+                view.Destroy()
+        if not found:
+            return ("No alarms configured on this vCenter. "
+                    "(Triggered-alarm state is not readable via this pyVmomi "
+                    "build; configured-alarm inventory is shown instead.)")
+        result = f"Configured Alarms ({len(found)}):\n\n"
+        for alm, entity in found:
+            info = getattr(alm, 'info', None)
+            name = getattr(info, 'name', 'Unknown')
+            enabled = getattr(info, 'enabled', 'Unknown')
+            desc = (getattr(info, 'description', '') or '').strip()
+            ent_name = getattr(entity, 'name', str(entity))
+            result += f"• {name}\n"
+            result += f"  Entity: {ent_name} ({type(entity).__name__})\n"
+            result += f"  Enabled: {enabled}\n"
+            result += f"  Description: {desc}\n\n" if desc else "\n"
+        return result.strip()
+    except Exception as e:
+        return f"Error getting alarms via pyVmomi: {e}"
+    finally:
+        client.close()
+
+
+def _fetch_props(service_instance, obj, paths) -> Dict:
+    """Retrieve specific properties for one managed object via PropertyCollector."""
+    content = service_instance.RetrieveContent()
+    obj_spec = vmodl.query.PropertyCollector.ObjectSpec(obj=obj)
+    prop_spec = vmodl.query.PropertyCollector.PropertySpec(
+        type=obj.__class__, all=False, pathSet=list(paths))
+    filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+        objectSet=[obj_spec], propSet=[prop_spec])
+    try:
+        res = content.propertyCollector.RetrieveProperties([filter_spec])
+    except Exception:
+        return {}
+    if not res:
+        return {}
+    return {p.name: p.val for p in res[0].propSet}
+
+
+def _pyvmomi_host_details(host_id: str, hostname: str) -> str:
+    client = PyVmomiClient(host=hostname)
+    try:
+        host = client.find_host_by_id(host_id)
+        if host is None:
+            return f"ESXi host {host_id} not found"
+        info = _fetch_props(client.si, host, [
+            'name', 'runtime.powerState', 'summary.runtime.connectionState',
+            'summary.config.product.version', 'summary.config.product.build',
+            'summary.hardware.model', 'summary.hardware.cpuModel',
+            'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads',
+            'summary.hardware.memorySize'])
+        result = f"Host Details: {info.get('name', host.name)}\n"
+        result += f"ID: {host_id}\n"
+        result += f"Connection State: {info.get('summary.runtime.connectionState', 'Unknown')}\n"
+        result += f"Power State: {info.get('runtime.powerState', 'Unknown')}\n"
+        if info.get('summary.hardware.model'):
+            result += f"Model: {info['summary.hardware.model']}\n"
+        if info.get('summary.hardware.cpuModel'):
+            result += (f"CPU: {info['summary.hardware.cpuModel']} "
+                       f"({info.get('summary.hardware.numCpuCores', '?')} cores / "
+                       f"{info.get('summary.hardware.numCpuThreads', '?')} threads)\n")
+        if info.get('summary.hardware.memorySize'):
+            result += f"Memory: {info['summary.hardware.memorySize'] / (1024**3):.0f} GB\n"
+        if info.get('summary.config.product.version'):
+            result += f"vSphere Version: {info['summary.config.product.version']}"
+            if info.get('summary.config.product.build'):
+                result += f" (build {info['summary.config.product.build']})"
+            result += "\n"
+        return result.strip()
+    except Exception as e:
+        return f"Error getting host details via pyVmomi for {host_id}: {e}"
+    finally:
+        client.close()
+
+
 # VM Management Tools
 @mcp.tool()
 def list_vms(hostname: str = None) -> str:
@@ -224,8 +463,12 @@ def get_host_details(hostname: str = None, host_id: str = None) -> str:
             return 'Error: No hostname provided and VCENTER_HOST not set in environment'
     client = VSphereClient(hostname)
     try:
-        response = client.get(f"vcenter/host/{host_id}")
-        host = response.get("value", {})
+        try:
+            host = client.get(f"vcenter/host/{host_id}").get("value", {})
+        except ConnectionError as e:
+            if not _is_404(e):
+                raise
+            return _pyvmomi_host_details(host_id, hostname)
 
         if not host:
             return f"ESXi host {host_id} not found"
@@ -704,7 +947,13 @@ def get_vm_disk_usage(hostname: str = None) -> str:
                 
                 if disks:
                     for i, disk in enumerate(disks):
-                        capacity = disk.get("capacity", 0)
+                        # vCenter returns disks either as dicts with a 'value'
+                        # nested dict (7.0, where capacity lives under value) or
+                        # as flat dicts; handle both shapes.
+                        disk_info = disk
+                        if isinstance(disk, dict) and isinstance(disk.get("value"), dict):
+                            disk_info = disk["value"]
+                        capacity = disk_info.get("capacity", 0) if isinstance(disk_info, dict) else 0
                         if capacity > 0:
                             # Convert bytes to GB
                             capacity_gb = capacity / (1024**3)
@@ -1134,10 +1383,14 @@ def list_vm_snapshots(vm_id: str, hostname: str = None) -> str:
                 return f"Virtual machine '{vm_id}' not found by name"
             vm_id = vm_id_found
         
-        # Get VM snapshots
-        response = client.get(f"vcenter/vm/{vm_id}/snapshot")
-        snapshots = response.get("value", [])
-        
+        # Get VM snapshots (vSphere 8.0 REST route; pyVmomi fallback on 7.0)
+        try:
+            snapshots = client.get(f"vcenter/vm/{vm_id}/snapshot").get("value", [])
+        except ConnectionError as e:
+            if not _is_404(e):
+                raise
+            return _pyvmomi_list_snapshots(vm_id, hostname)
+
         if not snapshots:
             return f"No snapshots found for VM {vm_id}"
         
@@ -1187,16 +1440,20 @@ def create_vm_snapshot(vm_id: str, snapshot_name: str, description: str = "", ho
                 return f"Virtual machine '{vm_id}' not found by name"
             vm_id = vm_id_found
         
-        # Create snapshot
+        # Create snapshot (vSphere 8.0 REST route; pyVmomi fallback on 7.0)
         snapshot_data = {
             "name": snapshot_name,
             "description": description,
             "memory": True,
             "quiesce": True
         }
-        
-        client.post(f"vcenter/vm/{vm_id}/snapshot", snapshot_data)
-        return f"Snapshot '{snapshot_name}' created successfully for VM {vm_id}"
+        try:
+            client.post(f"vcenter/vm/{vm_id}/snapshot", snapshot_data)
+            return f"Snapshot '{snapshot_name}' created successfully for VM {vm_id}"
+        except ConnectionError as e:
+            if not _is_404(e):
+                raise
+            return _pyvmomi_create_snapshot(vm_id, snapshot_name, description, hostname)
         
     except (ConnectionError, ValueError, KeyError) as e:
         return _handle_error(e, f"creating snapshot for VM {vm_id}")
@@ -1278,24 +1535,24 @@ def get_vm_events(vm_id: str, hostname: str = None) -> str:
                 return f"Virtual machine '{vm_id}' not found by name"
             vm_id = vm_id_found
         
-        # Get VM events (this endpoint might vary based on vSphere version)
+        # Get VM events (vSphere 8.0 REST route; pyVmomi fallback on 7.0)
         try:
-            response = client.get(f"vcenter/vm/{vm_id}/events")
-            events = response.get("value", [])
-            
-            if not events:
-                return f"No recent events found for VM {vm_id}"
-            
-            result = f"Recent Events for VM {vm_id}:\n\n"
-            for event in events[:10]:  # Show last 10 events
-                result += f"• {event.get('event_type', 'Unknown')}\n"
-                result += f"  Time: {event.get('time', 'Unknown')}\n"
-                result += f"  Description: {event.get('description', 'No description')}\n\n"
-            
-            return result.strip()
-            
-        except Exception:
-            return f"Events endpoint not available for VM {vm_id}. This feature requires specific vSphere API permissions."
+            events = client.get(f"vcenter/vm/{vm_id}/events").get("value", [])
+        except ConnectionError as e:
+            if not _is_404(e):
+                raise
+            return _pyvmomi_get_vm_events(vm_id, hostname)
+
+        if not events:
+            return f"No recent events found for VM {vm_id}"
+
+        result = f"Recent Events for VM {vm_id}:\n\n"
+        for event in events[:10]:  # Show last 10 events
+            result += f"• {event.get('event_type', 'Unknown')}\n"
+            result += f"  Time: {event.get('time', 'Unknown')}\n"
+            result += f"  Description: {event.get('description', 'No description')}\n\n"
+
+        return result.strip()
         
     except (ConnectionError, ValueError, KeyError) as e:
         return _handle_error(e, f"getting events for VM {vm_id}")
@@ -1317,25 +1574,25 @@ def get_alarms(hostname: str = None) -> str:
     
     client = VSphereClient(hostname)
     try:
-        # Get alarms (this endpoint might vary based on vSphere version)
+        # Get alarms (vSphere 8.0 REST route; pyVmomi fallback on 7.0)
         try:
-            response = client.get("vcenter/alarm")
-            alarms = response.get("value", [])
-            
-            if not alarms:
-                return "No active alarms found"
-            
-            result = f"Active Alarms ({len(alarms)}):\n\n"
-            for alarm in alarms:
-                result += f"• {alarm.get('name', 'Unknown')}\n"
-                result += f"  Status: {alarm.get('status', 'Unknown')}\n"
-                result += f"  Severity: {alarm.get('severity', 'Unknown')}\n"
-                result += f"  Description: {alarm.get('description', 'No description')}\n\n"
-            
-            return result.strip()
-            
-        except Exception:
-            return "Alarms endpoint not available. This feature requires specific vSphere API permissions."
+            alarms = client.get("vcenter/alarm").get("value", [])
+        except ConnectionError as e:
+            if not _is_404(e):
+                raise
+            return _pyvmomi_get_alarms(hostname)
+
+        if not alarms:
+            return "No active alarms found"
+
+        result = f"Active Alarms ({len(alarms)}):\n\n"
+        for alarm in alarms:
+            result += f"• {alarm.get('name', 'Unknown')}\n"
+            result += f"  Status: {alarm.get('status', 'Unknown')}\n"
+            result += f"  Severity: {alarm.get('severity', 'Unknown')}\n"
+            result += f"  Description: {alarm.get('description', 'No description')}\n\n"
+
+        return result.strip()
         
     except (ConnectionError, ValueError, KeyError) as e:
         return _handle_error(e, "getting alarms")
@@ -1666,9 +1923,14 @@ def delete_vm_snapshot(vm_id: str, snapshot_id: str, confirm: bool = False, host
                 return f"Virtual machine '{vm_id}' not found by name"
             vm_id = vm_id_found
         
-        # Delete snapshot
-        client.delete(f"vcenter/vm/{vm_id}/snapshot/{snapshot_id}")
-        return f"✅ Snapshot {snapshot_id} deleted successfully for VM {vm_id}"
+        # Delete snapshot (vSphere 8.0 REST route; pyVmomi fallback on 7.0)
+        try:
+            client.delete(f"vcenter/vm/{vm_id}/snapshot/{snapshot_id}")
+            return f"✅ Snapshot {snapshot_id} deleted successfully for VM {vm_id}"
+        except ConnectionError as e:
+            if not _is_404(e):
+                raise
+            return _pyvmomi_delete_snapshot(vm_id, snapshot_id, hostname)
         
     except (ConnectionError, ValueError, KeyError) as e:
         return _handle_error(e, f"deleting snapshot {snapshot_id} for VM {vm_id}")
