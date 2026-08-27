@@ -1,43 +1,23 @@
-version: '3.8'
-
 services:
   vsphere-mcp-server:
     build:
       context: .
       dockerfile: Dockerfile
+    image: vsphere-mcp-server:local
     container_name: vsphere-mcp-server
-    
-    # Expose port for HTTP server
+    restart: unless-stopped
+    # Container listens on 8000 internally; host exposes loopback 8010 -> 8000.
+    # To make it reachable on the LAN, change 127.0.0.1:8010 to 0.0.0.0:8010.
     ports:
-      - "8000:8000"
-    
-    # Load ALL variables from .env file (including host, user, password)
+      - "127.0.0.1:8010:8000"
     env_file:
       - .env
-      
-    # Additional environment variables (optional if using env_file, but useful for debug)
     environment:
-      # vCenter variables
-      - VCENTER_HOST=${VCENTER_HOST}
-      - VCENTER_USER=${VCENTER_USER}
-      - VCENTER_PASSWORD=${VCENTER_PASSWORD}
-      # Other configurations
-      - INSECURE=${INSECURE}
-      # Server configuration
-      - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8000
-
-    # Restart container in case of error
-    restart: unless-stopped
-    
-    # Network connections
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8000"
     networks:
       - vsphere-mcp-network
-      - backend
 
 networks:
   vsphere-mcp-network:
     driver: bridge
-  backend:
-    external: true
-    name: llm-rag-mcp_backend
